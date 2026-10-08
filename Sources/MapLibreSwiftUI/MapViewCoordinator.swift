@@ -19,7 +19,9 @@ extension MLNCameraChangeReason: @retroactive CustomStringConvertible {
 
     public var description: String {
         var names = Self.descriptions.filter { contains($0.0) }.map(\.1)
-        if names.isEmpty { names = ["none"] }
+        if names.isEmpty {
+            names = ["none"]
+        }
         return names.joined(separator: ",")
     }
 }
@@ -219,9 +221,14 @@ MLNMapViewDelegate {
     @MainActor func applyCameraChangeFromStateUpdate(
         _ mapView: MLNMapViewRepresentable,
         camera: MapViewCamera,
-        animated: Bool = true
+        animated: Bool = true,
+        reframing: Bool = false
     ) {
-        guard camera != snapshotCamera else {
+        // A content inset change interrupts any camera animation, so finish it within the new inset.
+        // MapLibre reframes a camera that's already tracking.
+        let isReframing = reframing
+            && !(camera.state.isTrackingUserLocation && mapView.userTrackingMode != .none)
+        guard camera != snapshotCamera || isReframing else {
             // No action - camera has not changed.
             return
         }
@@ -232,7 +239,7 @@ MLNMapViewDelegate {
         cameraUpdateTask?.cancel()
 
         cameraUpdateTask = Task { @MainActor in
-            return await withCheckedContinuation { continuation in
+            await withCheckedContinuation { continuation in
                 // Clean up the continuation if it was already set.
                 cameraUpdateContinuation?.resume()
                 cameraUpdateContinuation = nil
@@ -393,6 +400,17 @@ MLNMapViewDelegate {
                     mapView.setCamera(camera, animated: animated)
                 }
             }
+        }
+    }
+
+    /// Fits a bounding box or showcase camera to the map's new size.
+    @MainActor func refitAfterResize() {
+        guard let mapView, mapView.frame.size != .zero, let camera = snapshotCamera else { return }
+        switch camera.state {
+        case .rect, .showcase:
+            applyCameraChangeFromStateUpdate(mapView, camera: camera, animated: mapView.style != nil, reframing: true)
+        case .centered, .trackingUserLocation, .trackingUserLocationWithHeading, .trackingUserLocationWithCourse:
+            break
         }
     }
 
