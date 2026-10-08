@@ -290,93 +290,20 @@ MLNMapViewDelegate {
                         mapView.setCamera(camera, animated: animated)
                     }
                 case let .trackingUserLocation(zoom: zoom, pitch: pitch, pitchRange: pitchRange, direction: direction):
-                    if mapView.frame.size == .zero {
-                        // On init, the mapView's frame is not set up yet, so manipulation via camera is broken,
-                        // so let's do something else instead.
-                        // Needs to be non-animated or else it messes up following
-
-                        mapView.userTrackingMode = .follow
-
-                        mapView.zoomLevel = zoom
-                        mapView.direction = direction
-
-                        mapView.minimumPitch = pitch
-                        mapView.maximumPitch = pitch
-                        mapView.minimumPitch = pitchRange.rangeValue.lowerBound
-                        mapView.maximumPitch = pitchRange.rangeValue.upperBound
-                    } else {
-                        mapView.setUserTrackingMode(.follow, animated: animated) {
-                            guard mapView.userTrackingMode == .follow else {
-                                // Exit early if the user tracking mode is no longer set to follow
-                                return
-                            }
-
-                            mapView.zoomLevel = zoom
-                            mapView.direction = direction
-
-                            mapView.minimumPitch = pitch
-                            mapView.maximumPitch = pitch
-                            mapView.minimumPitch = pitchRange.rangeValue.lowerBound
-                            mapView.maximumPitch = pitchRange.rangeValue.upperBound
-                        }
-                    }
+                    applyUserTracking(
+                        .follow, zoom: zoom, pitch: pitch, pitchRange: pitchRange, direction: direction,
+                        to: mapView, animated: animated
+                    )
                 case let .trackingUserLocationWithHeading(zoom: zoom, pitch: pitch, pitchRange: pitchRange):
-                    if mapView.frame.size == .zero {
-                        // On init, the mapView's frame is not set up yet, so manipulation via camera is broken,
-                        // so let's do something else instead.
-                        // Needs to be non-animated or else it messes up following
-
-                        mapView.userTrackingMode = .followWithHeading
-
-                        mapView.zoomLevel = zoom
-
-                        mapView.minimumPitch = pitch
-                        mapView.maximumPitch = pitch
-                        mapView.minimumPitch = pitchRange.rangeValue.lowerBound
-                        mapView.maximumPitch = pitchRange.rangeValue.upperBound
-                    } else {
-                        mapView.setUserTrackingMode(.followWithHeading, animated: animated) {
-                            guard mapView.userTrackingMode == .followWithHeading else {
-                                // Exit early if the user tracking mode is no longer set to followWithHeading
-                                return
-                            }
-
-                            mapView.zoomLevel = zoom
-
-                            mapView.minimumPitch = pitch
-                            mapView.maximumPitch = pitch
-                            mapView.minimumPitch = pitchRange.rangeValue.lowerBound
-                            mapView.maximumPitch = pitchRange.rangeValue.upperBound
-                        }
-                    }
+                    applyUserTracking(
+                        .followWithHeading, zoom: zoom, pitch: pitch, pitchRange: pitchRange,
+                        to: mapView, animated: animated
+                    )
                 case let .trackingUserLocationWithCourse(zoom: zoom, pitch: pitch, pitchRange: pitchRange):
-                    if mapView.frame.size == .zero {
-                        mapView.userTrackingMode = .followWithCourse
-                        // On init, the mapView's frame is not set up yet, so manipulation via camera is broken,
-                        // so let's do something else instead.
-                        // Needs to be non-animated or else it messes up following
-
-                        mapView.zoomLevel = zoom
-
-                        mapView.minimumPitch = pitch
-                        mapView.maximumPitch = pitch
-                        mapView.minimumPitch = pitchRange.rangeValue.lowerBound
-                        mapView.maximumPitch = pitchRange.rangeValue.upperBound
-                    } else {
-                        mapView.setUserTrackingMode(.followWithCourse, animated: animated) {
-                            guard mapView.userTrackingMode == .followWithCourse else {
-                                // Exit early if the user tracking mode is no longer set to followWithCourse
-                                return
-                            }
-
-                            mapView.zoomLevel = zoom
-
-                            mapView.minimumPitch = pitch
-                            mapView.maximumPitch = pitch
-                            mapView.minimumPitch = pitchRange.rangeValue.lowerBound
-                            mapView.maximumPitch = pitchRange.rangeValue.upperBound
-                        }
-                    }
+                    applyUserTracking(
+                        .followWithCourse, zoom: zoom, pitch: pitch, pitchRange: pitchRange,
+                        to: mapView, animated: animated
+                    )
                 case let .rect(boundingBox, padding):
                     mapView.minimumPitch = 0
                     mapView.maximumPitch = 0
@@ -411,6 +338,83 @@ MLNMapViewDelegate {
             applyCameraChangeFromStateUpdate(mapView, camera: camera, animated: mapView.style != nil, reframing: true)
         case .centered, .trackingUserLocation, .trackingUserLocationWithHeading, .trackingUserLocationWithCourse:
             break
+        }
+    }
+
+    /// Moves to the user's location, zoom and pitch in one animation, then starts tracking.
+    ///
+    /// - Parameter direction: The fixed direction for `.follow`; the other modes rotate to the user's
+    ///   heading or course.
+    @MainActor private func applyUserTracking(
+        _ mode: MLNUserTrackingMode,
+        zoom: Double,
+        pitch: Double,
+        pitchRange: CameraPitchRange,
+        direction: CLLocationDirection? = nil,
+        to mapView: MLNMapViewRepresentable,
+        animated: Bool
+    ) {
+        func applyZoomAndPitch() {
+            mapView.zoomLevel = zoom
+            if let direction {
+                mapView.direction = direction
+            }
+
+            mapView.minimumPitch = pitch
+            mapView.maximumPitch = pitch
+            mapView.minimumPitch = pitchRange.rangeValue.lowerBound
+            mapView.maximumPitch = pitchRange.rangeValue.upperBound
+        }
+
+        if mapView.frame.size == .zero {
+            // On init, the mapView's frame is not set up yet, so manipulation via camera is broken,
+            // so let's do something else instead.
+            // Needs to be non-animated or else it messes up following
+            mapView.userTrackingMode = mode
+            applyZoomAndPitch()
+            return
+        }
+
+        guard animated, let userLocation = mapView.userLocation, let location = userLocation.location,
+              CLLocationCoordinate2DIsValid(location.coordinate)
+        else {
+            mapView.setUserTrackingMode(mode, animated: animated) {
+                guard mapView.userTrackingMode == mode else { return }
+                applyZoomAndPitch()
+            }
+            return
+        }
+
+        let heading = switch mode {
+        case .followWithCourse where location.course >= 0:
+            location.course
+        case .followWithHeading:
+            userLocation.heading?.trueHeading ?? mapView.direction
+        default:
+            direction ?? mapView.direction
+        }
+        let target = MLNMapCamera(
+            lookingAtCenter: location.coordinate,
+            altitude: MLNAltitudeForZoomLevel(zoom, pitch, location.coordinate.latitude, mapView.frame.size),
+            pitch: pitch,
+            heading: heading
+        )
+
+        // Let the pitch pass through every angle between here and the target.
+        let currentPitch = mapView.camera.pitch
+        mapView.minimumPitch = min(currentPitch, pitchRange.rangeValue.lowerBound)
+        mapView.maximumPitch = max(currentPitch, pitchRange.rangeValue.upperBound)
+
+        mapView.userTrackingMode = .none
+        mapView.fly(to: target) {
+            // MapLibre also completes a flight that a gesture or another camera change interrupted.
+            let center = mapView.camera.centerCoordinate
+            let arrived = abs(mapView.zoomLevel - zoom) < 0.01
+                && CLLocation(latitude: center.latitude, longitude: center.longitude).distance(from: location) < 1
+            guard arrived else { return }
+
+            mapView.userTrackingMode = mode
+            applyZoomAndPitch()
         }
     }
 

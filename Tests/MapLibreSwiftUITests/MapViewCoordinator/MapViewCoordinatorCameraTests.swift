@@ -224,6 +224,30 @@ final class MapViewCoordinatorCameraTests: XCTestCase {
             .setCalled(1)
     }
 
+    @MainActor func testAnimatedUserTrackingWithoutLocationFallsBackToTrackingMode() async throws {
+        let newCamera: MapViewCamera = .trackUserLocationWithCourse()
+        let laidOutMapView = MockMLNMapViewRepresentable()
+        given(laidOutMapView).frame.willReturn(CGRect(x: 0, y: 0, width: 400, height: 800))
+        given(laidOutMapView).userLocation.willReturn(nil)
+        given(laidOutMapView)
+            .setUserTrackingMode(.any, animated: .any, completionHandler: .any)
+            .willReturn()
+
+        try await simulateCameraUpdateAndWait {
+            self.coordinator.applyCameraChangeFromStateUpdate(
+                laidOutMapView, camera: newCamera, animated: true
+            )
+        }
+
+        verify(laidOutMapView)
+            .setUserTrackingMode(.value(.followWithCourse), animated: .value(true), completionHandler: .any)
+            .called(1)
+
+        verify(laidOutMapView)
+            .fly(to: .any, completionHandler: .any)
+            .called(0)
+    }
+
     @MainActor func testUserTrackingWithCourseCameraUpdate() async throws {
         let newCamera: MapViewCamera = .trackUserLocationWithCourse()
 

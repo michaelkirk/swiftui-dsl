@@ -25,6 +25,8 @@ public protocol MLNMapViewRepresentable: AnyObject {
     @MainActor var camera: MLNMapCamera { get set }
     @MainActor var frame: CGRect { get set }
     @MainActor func setCamera(_ camera: MLNMapCamera, animated: Bool)
+    @MainActor func fly(to camera: MLNMapCamera, completionHandler: (() -> Void)?)
+    @MainActor var userLocation: MLNUserLocation? { get }
     @MainActor func setCenter(_ coordinate: CLLocationCoordinate2D,
                               zoomLevel: Double,
                               direction: CLLocationDirection,
